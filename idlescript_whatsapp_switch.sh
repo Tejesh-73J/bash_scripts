@@ -16,12 +16,18 @@ bash /home/tejesh/bash_scripts/battery_alert.sh > /dev/null 2>&1 &
 BATTERY_ALERT_PID=$!
 echo "Battery alert script started (PID: $BATTERY_ALERT_PID)"
 
-# Trap to kill battery alert when this script exits
+# Start kill process scheduler in the background (kills 'teamlogger' at 22:35 and exits this script)
+bash /home/tejesh/bash_scripts/kill_process_at_time.sh "22:35" "teamlogger" "$$" > /dev/null 2>&1 &
+KILL_PROCESS_PID=$!
+echo "Process termination scheduler started (PID: $KILL_PROCESS_PID, targeting 'teamlogger' at 22:35)"
+
+# Trap to kill background scripts when this script exits
 cleanup() {
     echo ""
-    echo "Stopping battery alert script (PID: $BATTERY_ALERT_PID)..."
+    echo "Stopping background scripts..."
     kill $BATTERY_ALERT_PID 2>/dev/null
-    echo "Both scripts stopped. Goodbye!"
+    kill $KILL_PROCESS_PID 2>/dev/null
+    echo "All scripts stopped. Goodbye!"
     exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT

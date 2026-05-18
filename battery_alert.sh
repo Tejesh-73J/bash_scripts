@@ -132,6 +132,8 @@ echo "Monitoring battery level... (Threshold: ${BATTERY_THRESHOLD}%)"
 echo "Alert duration: ${sound_duration} seconds"
 echo "Press Ctrl+C to stop"
 
+NEXT_ALERT_THRESHOLD=$BATTERY_THRESHOLD
+
 while true; do
     battery_level=$(get_battery_percentage)
     
@@ -144,13 +146,14 @@ while true; do
     is_charging=$(is_battery_charging)
     
     if [ "$is_charging" = "true" ]; then
+        NEXT_ALERT_THRESHOLD=$BATTERY_THRESHOLD
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Battery Level: ${battery_level}% (Charging)"
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Battery Level: ${battery_level}% (Not Charging)"
     fi
     
-    # Check if battery is at or below threshold AND not charging
-    if [ "$battery_level" -le "$BATTERY_THRESHOLD" ] && [ "$is_charging" = "false" ]; then
+    # Check if battery is at or below NEXT_ALERT_THRESHOLD AND not charging
+    if [ "$battery_level" -le "$NEXT_ALERT_THRESHOLD" ] && [ "$is_charging" = "false" ]; then
         echo "⚠️  ALERT: Battery at ${battery_level}% and NOT charging! Triggering alert..."
         
         # Unmute and maximize volume
@@ -162,7 +165,10 @@ while true; do
         # Play alert sound continuously for the configured duration
         play_alert_sound_continuous $sound_duration
         
-        echo "Alert completed. Will check again in ${CHECK_INTERVAL} seconds..."
+        # Update NEXT_ALERT_THRESHOLD for every 3 percent decrease
+        NEXT_ALERT_THRESHOLD=$((battery_level - 3))
+        
+        echo "Alert completed. Next alert at or below ${NEXT_ALERT_THRESHOLD}%. Will check again in ${CHECK_INTERVAL} seconds..."
     fi
     
     sleep $CHECK_INTERVAL
