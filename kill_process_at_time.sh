@@ -50,46 +50,55 @@ while true; do
         echo ""
         echo "[$(TZ="Asia/Kolkata" date '+%Y-%m-%d %H:%M:%S')] Target time reached!"
         
-        # Find all process IDs matching the process name case-insensitively
-        # Excluding grep, the script itself, and common utilities
-        PIDS=$(pgrep -f -i "$PROCESS_NAME" | grep -v "$$" | grep -v "$PPID")
-        
-        if [ -n "$PARENT_PID" ]; then
-            # Also exclude the parent script from process list to avoid double killing it here
-            PIDS=$(echo "$PIDS" | grep -v "$PARENT_PID")
+        # 1. Stop via systemd user manager to prevent GNOME Session from auto-restarting the application.
+        # We use --no-block to prevent our script from hanging on stubborn Electron processes.
+        echo "Telling systemd/GNOME to stop matching application scopes..."
+        SYSTEMD_UNITS=$(systemctl --user list-units --all --no-legend | grep -i "$PROCESS_NAME" | awk '{print $1}')
+        if [ -n "$SYSTEMD_UNITS" ]; then
+            echo "Stopping systemd units: $SYSTEMD_UNITS"
+            systemctl --user stop --no-block $SYSTEMD_UNITS 2>/dev/null
+            sleep 0.5
         fi
-        
-        # Flatten PIDs to a space-separated string
-        PIDS=$(echo $PIDS)
 
-        if [ -z "$PIDS" ]; then
-            echo "No running processes found matching '$PROCESS_NAME'."
-        else
-            echo "Found PIDs matching '$PROCESS_NAME': $PIDS"
+        # 2. Loop up to 8 times to ensure all remaining/stubborn/newly spawned processes are dead
+        PROCESS_KILLED=false
+        for attempt in {1..8}; do
+            # Find all process IDs matching the process name case-insensitively
+            # Excluding grep, the script itself, and common utilities
+            PIDS=$(pgrep -f -i "$PROCESS_NAME" | grep -v "$$" | grep -v "$PPID")
             
-            # Try normal kill first (since teamlogger/whatsapp run as the user)
-            echo "Attempting to terminate process(es)..."
-            kill -15 $PIDS 2>/dev/null
-            sleep 1
+            if [ -n "$PARENT_PID" ]; then
+                # Also exclude the parent script from process list to avoid double killing it here
+                PIDS=$(echo "$PIDS" | grep -v "$PARENT_PID")
+            fi
             
-            # Force kill if still running
-            STUBBORN_PIDS=""
-            for PID in $PIDS; do
-                if kill -0 "$PID" 2>/dev/null; then
-                    STUBBORN_PIDS="$STUBBORN_PIDS $PID"
-                fi
-            done
-            
-            if [ -n "$STUBBORN_PIDS" ]; then
-                echo "Force-killing stubborn process(es):$STUBBORN_PIDS..."
-                if [ -n "$SUDO_PASS" ]; then
-                    echo "$SUDO_PASS" | sudo -S kill -9 $STUBBORN_PIDS 2>/dev/null
+            # Flatten PIDs to a space-separated string
+            PIDS=$(echo $PIDS)
+
+            if [ -z "$PIDS" ]; then
+                if [ "$PROCESS_KILLED" = true ]; then
+                    echo "All processes matching '$PROCESS_NAME' have been successfully terminated."
                 else
-                    kill -9 $STUBBORN_PIDS 2>/dev/null
+                    echo "No running processes found matching '$PROCESS_NAME'."
+                fi
+                break
+            fi
+            
+            PROCESS_KILLED=true
+            echo "Found PIDs matching '$PROCESS_NAME' (Attempt $attempt/8): $PIDS"
+            if [ $attempt -eq 1 ]; then
+                echo "Attempting graceful termination (SIGTERM)..."
+                kill -15 $PIDS 2>/dev/null
+            else
+                echo "Forcefully killing remaining/newly-spawned processes (SIGKILL)..."
+                if [ -n "$SUDO_PASS" ]; then
+                    echo "$SUDO_PASS" | sudo -S kill -9 $PIDS 2>/dev/null
+                else
+                    kill -9 $PIDS 2>/dev/null
                 fi
             fi
-            echo "Process termination complete."
-        fi
+            sleep 1.0
+        done
 
         # Close the parent script if specified
         if [ -n "$PARENT_PID" ]; then
